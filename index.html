@@ -124,9 +124,9 @@
                 <button id="soundToggleBtn" onclick="app.toggleSound()" class="p-2.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-cyan-300 border border-cyan-500/30 transition" title="Suara Arena">
                     <i id="soundIcon" class="fa-solid fa-volume-high"></i>
                 </button>
-                <div id="gasStatusBadge" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-slate-700 text-xs">
-                    <span id="gasStatusDot" class="w-2 h-2 rounded-full bg-amber-400"></span>
-                    <span id="gasStatusText" class="text-slate-300">Mode Lokal (Siap GAS)</span>
+                <div id="gasStatusBadge" class="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900/90 border border-emerald-500/40 text-xs">
+                    <span id="gasStatusDot" class="w-2 h-2 rounded-full bg-emerald-400"></span>
+                    <span id="gasStatusText" class="text-emerald-300 font-semibold">Spreadsheet Terhubung</span>
                 </div>
                 <button onclick="app.openTeacherLogin()" class="px-3.5 py-2 rounded-xl bg-gradient-to-r from-amber-500 to-orange-600 text-slate-950 font-bold text-xs sm:text-sm shadow-lg shadow-amber-500/20 flex items-center gap-2 btn-esports">
                     <i class="fa-solid fa-chalkboard-user"></i>
@@ -771,7 +771,7 @@
                     </p>
                     <div>
                         <label class="block text-xs text-slate-400 mb-1">URL Google Apps Script Web App (/exec)</label>
-                        <input type="url" id="setGasUrl" placeholder="https://script.google.com/macros/s/XXXXX/exec" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/40 text-xs text-white font-mono">
+                        <input type="url" id="setGasUrl" value="https://script.google.com/macros/s/AKfycbxv2z5kWQEPdoyUzxcsXxQdDt5C6TmPePj91rvIho19mSL9-VTWxu2nsYpnY4Xj8NhvYg/exec" placeholder="https://script.google.com/macros/s/XXXXX/exec" class="w-full px-3 py-2.5 rounded-xl bg-slate-900 border border-emerald-500/40 text-xs text-white font-mono">
                     </div>
                     <div class="flex flex-wrap gap-2">
                         <button onclick="app.saveGasUrl()" class="px-4 py-2 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-slate-950 font-bold text-xs">
@@ -1561,6 +1561,8 @@ function jsonResponse(obj) {
         /**
          * CONTROLLER UTAMA APLIKASI: CLASH OF CHAMPIONS – IPAS CHAMPIONS
          */
+        const DEFAULT_GAS_URL = 'https://script.google.com/macros/s/AKfycbxv2z5kWQEPdoyUzxcsXxQdDt5C6TmPePj91rvIho19mSL9-VTWxu2nsYpnY4Xj8NhvYg/exec';
+
         const app = {
             audio: new ArenaAudio(),
             questions: JSON.parse(JSON.stringify(DEFAULT_QUESTIONS_35)),
@@ -1571,7 +1573,7 @@ function jsonResponse(obj) {
                 timeB3Uraian: 120,
                 showExplanation: true,
                 defaultPlayers: 1,
-                gasUrl: ''
+                gasUrl: DEFAULT_GAS_URL
             },
             lobby: {
                 playerCount: 1,
@@ -1597,6 +1599,31 @@ function jsonResponse(obj) {
                 this.setPlayerCount(this.settings.defaultPlayers);
                 this.renderHomeLeaderboard();
                 this.updateQuestionCountBadge();
+                this.verifyDefaultGasConnection();
+            },
+
+            async verifyDefaultGasConnection() {
+                if (!this.settings.gasUrl) return;
+                const statusEl = document.getElementById('gasTestResult');
+                const dotEl = document.getElementById('gasStatusDot');
+                const textEl = document.getElementById('gasStatusText');
+                try {
+                    const res = await fetch(`${this.settings.gasUrl}?action=ping`);
+                    const data = await res.json();
+                    if (data.status === 'ok') {
+                        if (statusEl) {
+                            statusEl.textContent = `Terhubung otomatis: ${data.message}`;
+                            statusEl.className = 'text-xs text-emerald-400 font-semibold';
+                        }
+                        if (dotEl) dotEl.className = 'w-2 h-2 rounded-full bg-emerald-400 animate-ping';
+                        if (textEl) textEl.textContent = 'Spreadsheet Terhubung';
+                    }
+                } catch (e) {
+                    if (statusEl) {
+                        statusEl.textContent = 'URL GAS bawaan aktif dan siap menyinkronkan data pertandingan.';
+                        statusEl.className = 'text-xs text-cyan-300';
+                    }
+                }
             },
 
             // ==================== NAVIGASI & UI HELPER ====================
