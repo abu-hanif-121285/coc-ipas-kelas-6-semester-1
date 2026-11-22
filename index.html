@@ -254,14 +254,23 @@
                                     <i class="fa-solid fa-wifi"></i> Multi-Perangkat (GAS)
                                 </button>
                             </div>
-                            <div id="onlineRoomBox" class="hidden mt-2 p-2.5 rounded-xl bg-purple-950/50 border border-purple-500/40 space-y-2">
+                            <div id="onlineRoomBox" class="hidden mt-2 p-3 rounded-xl bg-purple-950/60 border border-purple-500/40 space-y-2.5">
                                 <div class="flex gap-2">
-                                    <input type="text" id="roomCodeInput" placeholder="Kode Room (Misal: IPAS6A)" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-purple-400/40 text-xs text-white uppercase font-mono">
-                                    <button type="button" onclick="app.syncRoomOnline()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white whitespace-nowrap">
-                                        <i class="fa-solid fa-rotate"></i> Sync Room
+                                    <input type="text" id="roomCodeInput" value="IPAS6A" placeholder="Kode Room (Misal: IPAS6A)" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-purple-400/40 text-xs text-white uppercase font-mono">
+                                    <button type="button" onclick="app.syncRoomOnline()" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white whitespace-nowrap flex items-center gap-1.5">
+                                        <i class="fa-solid fa-right-to-bracket"></i> Gabung / Sync Room
                                     </button>
                                 </div>
-                                <p class="text-[11px] text-purple-200">Pastikan URL Web App Google Apps Script sudah diatur di Panel Guru untuk sinkronisasi antar perangkat.</p>
+                                <div id="onlineRoomRoster" class="p-2 rounded-lg bg-slate-950/80 border border-purple-500/30 text-[11px] space-y-1">
+                                    <div class="flex items-center justify-between text-purple-300 font-bold">
+                                        <span><i class="fa-solid fa-users-viewfinder mr-1"></i> Peserta Terhubung di Room:</span>
+                                        <span id="onlineRoomCountBadge" class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200">0 Pemain</span>
+                                    </div>
+                                    <div id="onlineRoomPlayersList" class="text-slate-300 italic">
+                                        Isi identitas Anda di bawah lalu klik "Gabung / Sync Room".
+                                    </div>
+                                </div>
+                                <p class="text-[10px] text-purple-200/80">Setiap perangkat cukup mengisi 1 pemain lokal (Solo), lalu klik <strong>Gabung / Sync Room</strong> dengan kode yang sama agar bertanding serentak!</p>
                             </div>
                         </div>
 
@@ -1025,6 +1034,7 @@
                     <p class="text-xs">Di Google Spreadsheet, klik <strong>Ekstensi &rarr; Apps Script</strong>, hapus kode lama, tempel kode berikut, lalu klik <strong>Deploy &rarr; Deployment Baru &rarr; Aplikasi Web</strong> (Akses: <em>Siapa saja / Anyone</em>).</p>
                     <pre id="gasSourceCodeBlock" class="p-3 rounded-xl bg-slate-950 border border-slate-800 text-[11px] font-mono text-emerald-200 overflow-x-auto max-h-60 select-all">// ============================================================================
 // GOOGLE APPS SCRIPT BACKEND: CLASH OF CHAMPIONS - IPAS CHAMPIONS (KELAS 6 SD)
+// Mendukung Live Multiplayer Room Real-Time Multi-Perangkat
 // Created by Wiyanto Abu Hanif
 // ============================================================================
 
@@ -1043,7 +1053,7 @@ function setupSheets() {
   const headers = {
     BANK_SOAL: ['ID', 'BABAK', 'NOMOR', 'MATERI', 'JENIS', 'PERTANYAAN', 'A', 'B', 'C', 'D', 'KUNCI', 'PEMBAHASAN', 'LEVEL', 'BOBOT', 'RUBRIK_URAIAN', 'JAWABAN_IDEAL'],
     PENGATURAN: ['KUNCI_PENGATURAN', 'NILAI', 'DIPERBARUI'],
-    DATA_PEMAIN: ['TIMESTAMP', 'ROOM_CODE', 'NAMA', 'AVATAR', 'STATUS'],
+    DATA_PEMAIN: ['TIMESTAMP', 'ROOM_CODE', 'PLAYER_UID', 'NAMA', 'AVATAR', 'STATUS', 'GAME_POINTS', 'ACADEMIC_SCORE', 'CORRECT_COUNT', 'WRONG_COUNT', 'CURRENT_NO'],
     HASIL_PERTANDINGAN: ['TIMESTAMP', 'MATCH_ID', 'NAMA', 'SKOR_PG', 'SKOR_ISIAN', 'SKOR_URAIAN', 'NILAI_ASAS', 'POIN_KOMPETISI', 'BENAR', 'SALAH'],
     RIWAYAT_JAWABAN: ['TIMESTAMP', 'MATCH_ID', 'NAMA', 'NOMOR_SOAL', 'JENIS', 'JAWABAN_SISWA', 'STATUS_BENAR', 'SKOR_ASAS'],
     LEADERBOARD: ['PERINGKAT', 'NAMA', 'AVATAR', 'POIN_KOMPETISI', 'NILAI_ASAS', 'TANGGAL'],
@@ -1066,7 +1076,35 @@ function doGet(e) {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
 
   if (action === 'ping') {
-    return jsonResponse({ status: 'ok', message: 'GAS IPAS Champions Aktif!' });
+    return jsonResponse({ status: 'ok', message: 'GAS IPAS Champions Live Multiplayer Aktif!' });
+  }
+
+  // Ambil daftar pemain & skor langsung dalam satu Room Code (Real-Time)
+  if (action === 'getRoomState') {
+    const roomCode = (e.parameter.roomCode || 'IPAS6A').toUpperCase();
+    const sheet = ss.getSheetByName('DATA_PEMAIN');
+    const data = sheet.getDataRange().getValues();
+    const players = [];
+    const nowMs = Date.now();
+    for (let i = 1; i < data.length; i++) {
+      const rowRoom = String(data[i][1] || '').toUpperCase();
+      const ts = new Date(data[i][0]).getTime();
+      // Ambil peserta aktif di room dalam 3 jam terakhir
+      if (rowRoom === roomCode && (!isNaN(ts) ? (nowMs - ts) < 10800000 : true)) {
+        players.push({
+          uid: String(data[i][2]),
+          name: String(data[i][3]),
+          avatar: String(data[i][4]),
+          status: String(data[i][5]),
+          gamePoints: Number(data[i][6] || 0),
+          academicScore: Number(data[i][7] || 0),
+          correctCount: Number(data[i][8] || 0),
+          wrongCount: Number(data[i][9] || 0),
+          currentNo: Number(data[i][10] || 1)
+        });
+      }
+    }
+    return jsonResponse({ status: 'ok', roomCode: roomCode, players: players });
   }
 
   // Ambil soal untuk pemain TANPA mengirim kunci jawaban & rubrik sebelum penilaian
@@ -1110,6 +1148,43 @@ function doPost(e) {
   setupSheets();
   const payload = JSON.parse(e.postData.contents);
   const ss = SpreadsheetApp.getActiveSpreadsheet();
+
+  // Daftarkan atau perbarui posisi & skor pemain secara real-time di DATA_PEMAIN
+  if (payload.action === 'upsertRoomPlayer') {
+    const sheet = ss.getSheetByName('DATA_PEMAIN');
+    const data = sheet.getDataRange().getValues();
+    const roomCode = String(payload.roomCode || 'IPAS6A').toUpperCase();
+    const uid = String(payload.uid);
+    const now = new Date();
+    const rowValues = [
+      now,
+      roomCode,
+      uid,
+      payload.name,
+      payload.avatar,
+      payload.status || 'LOBBY',
+      Number(payload.gamePoints || 0),
+      Number(payload.academicScore || 0),
+      Number(payload.correctCount || 0),
+      Number(payload.wrongCount || 0),
+      Number(payload.currentNo || 1)
+    ];
+
+    let foundRow = -1;
+    for (let i = 1; i < data.length; i++) {
+      if (String(data[i][1]).toUpperCase() === roomCode && String(data[i][2]) === uid) {
+        foundRow = i + 1;
+        break;
+      }
+    }
+
+    if (foundRow > 0) {
+      sheet.getRange(foundRow, 1, 1, rowValues.length).setValues([rowValues]);
+    } else {
+      sheet.appendRow(rowValues);
+    }
+    return jsonResponse({ status: 'ok', message: 'Status pemain tersinkron!' });
+  }
 
   if (payload.action === 'syncBankSoal') {
     if (payload.pwd !== 'Inovatif') return jsonResponse({ status: 'error', message: 'Unauthorized' });
@@ -1578,7 +1653,10 @@ function jsonResponse(obj) {
             lobby: {
                 playerCount: 1,
                 deviceMode: 'local', // 'local' | 'online'
-                roomCode: 'IPAS6A'
+                roomCode: 'IPAS6A',
+                deviceUid: 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
+                onlinePlayers: [],
+                roomPollInterval: null
             },
             match: {
                 active: false,
@@ -1587,6 +1665,7 @@ function jsonResponse(obj) {
                 currentQuestionIndex: 0, // 0..34
                 currentPlayerTurn: 0,    // 0..(playerCount-1)
                 timerInterval: null,
+                livePollInterval: null,
                 timeLeft: 20,
                 maxTime: 20,
                 answeredCurrentTurn: false,
@@ -1749,20 +1828,147 @@ function jsonResponse(obj) {
                     localBtn.className = 'p-2 rounded-xl border border-cyan-400 bg-cyan-500/20 text-xs font-bold text-white flex items-center justify-center gap-2';
                     onlineBtn.className = 'p-2 rounded-xl border border-slate-700 bg-slate-800/60 text-xs font-bold text-slate-300 flex items-center justify-center gap-2';
                     roomBox.classList.add('hidden');
+                    clearInterval(this.lobby.roomPollInterval);
                 } else {
                     onlineBtn.className = 'p-2 rounded-xl border border-purple-400 bg-purple-500/20 text-xs font-bold text-white flex items-center justify-center gap-2';
                     localBtn.className = 'p-2 rounded-xl border border-slate-700 bg-slate-800/60 text-xs font-bold text-slate-300 flex items-center justify-center gap-2';
                     roomBox.classList.remove('hidden');
+                    // Pada mode multi-perangkat, setiap perangkat mengendalikan 1 peserta lokal
+                    if (this.lobby.playerCount > 1) {
+                        this.setPlayerCount(1);
+                    }
+                    this.fetchRoomState();
+                    clearInterval(this.lobby.roomPollInterval);
+                    this.lobby.roomPollInterval = setInterval(() => this.fetchRoomState(), 3500);
                 }
             },
 
-            syncRoomOnline() {
+            async syncRoomOnline() {
                 const code = document.getElementById('roomCodeInput').value.trim().toUpperCase() || 'IPAS6A';
                 this.lobby.roomCode = code;
                 if (!this.settings.gasUrl) {
-                    this.showToast('URL Google Apps Script belum diisi di Panel Guru. Mode Room berjalan dalam simulasi lokal.', 'warning');
-                } else {
-                    this.showToast(`Room ${code} tersinkronisasi dengan Google Spreadsheet!`);
+                    this.showToast('URL Google Apps Script belum diisi di Panel Guru.', 'warning');
+                    return;
+                }
+
+                const nameEl = document.getElementById('playerName_0');
+                const avatarEl = document.getElementById('playerAvatar_0');
+                const localName = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Peserta Online';
+                const localAvatar = avatarEl ? avatarEl.value : '🚀';
+
+                this.showToast(`Menyinkronkan ke Room ${code}...`);
+                try {
+                    await fetch(this.settings.gasUrl, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'upsertRoomPlayer',
+                            roomCode: code,
+                            uid: this.lobby.deviceUid,
+                            name: localName,
+                            avatar: localAvatar,
+                            status: 'LOBBY',
+                            gamePoints: 0,
+                            academicScore: 0,
+                            correctCount: 0,
+                            wrongCount: 0,
+                            currentNo: 1
+                        })
+                    });
+                    await this.fetchRoomState();
+                    this.showToast(`${localName} berhasil bergabung di Room ${code}!`);
+                } catch (e) {
+                    this.showToast('Gagal sinkron ke Room. Pastikan script GAS terbaru sudah di-Deploy!', 'error');
+                }
+            },
+
+            async fetchRoomState() {
+                if (!this.settings.gasUrl || this.lobby.deviceMode !== 'online') return;
+                const code = (document.getElementById('roomCodeInput')?.value || this.lobby.roomCode || 'IPAS6A').trim().toUpperCase();
+                this.lobby.roomCode = code;
+                try {
+                    const res = await fetch(`${this.settings.gasUrl}?action=getRoomState&roomCode=${encodeURIComponent(code)}`);
+                    const data = await res.json();
+                    if (data.status === 'ok' && Array.isArray(data.players)) {
+                        this.lobby.onlinePlayers = data.players;
+                        const badge = document.getElementById('onlineRoomCountBadge');
+                        const listEl = document.getElementById('onlineRoomPlayersList');
+                        if (badge) badge.textContent = `${data.players.length} Pemain`;
+                        if (listEl) {
+                            if (data.players.length === 0) {
+                                listEl.innerHTML = `<span class="italic text-slate-400">Belum ada pemain di room ${code}. Klik "Gabung / Sync Room".</span>`;
+                            } else {
+                                listEl.innerHTML = data.players.map(p => `
+                                    <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-purple-900/70 border border-purple-500/40 text-white mr-1.5 mb-1">
+                                        <span>${p.avatar}</span>
+                                        <span class="font-semibold">${p.name}</span>
+                                        ${p.uid === this.lobby.deviceUid ? '<span class="text-[9px] text-cyan-300">(Anda)</span>' : ''}
+                                    </span>
+                                `).join('');
+                            }
+                        }
+
+                        // Jika sedang bertanding dalam mode online, perbarui scoreboard lawan secara live
+                        if (this.match.active && this.lobby.deviceMode === 'online') {
+                            this.mergeOnlinePlayersToMatch(data.players);
+                            this.renderArenaScoreboard();
+                        }
+                    }
+                } catch (e) {
+                    console.warn('Room poll skipped:', e);
+                }
+            },
+
+            mergeOnlinePlayersToMatch(remotePlayers) {
+                const localPlayer = this.match.players.find(p => p.uid === this.lobby.deviceUid) || this.match.players[0];
+                const merged = [localPlayer];
+                remotePlayers.forEach(rp => {
+                    if (rp.uid !== this.lobby.deviceUid) {
+                        merged.push({
+                            id: rp.uid,
+                            uid: rp.uid,
+                            name: rp.name,
+                            avatar: rp.avatar,
+                            gamePoints: rp.gamePoints || 0,
+                            academicScore: rp.academicScore || 0,
+                            scorePG: 0,
+                            scoreIsian: 0,
+                            scoreUraian: 0,
+                            correctCount: rp.correctCount || 0,
+                            wrongCount: rp.wrongCount || 0,
+                            currentNo: rp.currentNo || 1,
+                            isRemote: true
+                        });
+                    }
+                });
+                this.match.players = merged;
+            },
+
+            async pushLocalProgressToRoom(status = 'PLAYING') {
+                if (!this.settings.gasUrl || this.lobby.deviceMode !== 'online') return;
+                const localPlayer = this.match.players.find(p => p.uid === this.lobby.deviceUid) || this.match.players[0];
+                if (!localPlayer) return;
+                const rawScore = localPlayer.scorePG + localPlayer.scoreIsian + localPlayer.scoreUraian;
+                const academicScore = Math.min(100, rawScore * 2);
+                const currentQ = this.questions[this.match.currentQuestionIndex];
+                try {
+                    await fetch(this.settings.gasUrl, {
+                        method: 'POST',
+                        body: JSON.stringify({
+                            action: 'upsertRoomPlayer',
+                            roomCode: this.lobby.roomCode,
+                            uid: this.lobby.deviceUid,
+                            name: localPlayer.name,
+                            avatar: localPlayer.avatar,
+                            status,
+                            gamePoints: localPlayer.gamePoints,
+                            academicScore,
+                            correctCount: localPlayer.correctCount,
+                            wrongCount: localPlayer.wrongCount,
+                            currentNo: currentQ ? currentQ.nomor : 35
+                        })
+                    });
+                } catch (e) {
+                    console.warn('Push room progress skipped:', e);
                 }
             },
 
@@ -1775,15 +1981,18 @@ function jsonResponse(obj) {
 
                 // Pastikan soal terurut nomor 1..35
                 this.questions.sort((a, b) => a.nomor - b.nomor);
+                clearInterval(this.lobby.roomPollInterval);
 
                 const players = [];
-                for (let i = 0; i < this.lobby.playerCount; i++) {
-                    const nameEl = document.getElementById(`playerName_${i}`);
-                    const avatarEl = document.getElementById(`playerAvatar_${i}`);
-                    const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : `Peserta ${i + 1}`;
-                    const avatar = avatarEl ? avatarEl.value : AVATARS[i];
+                if (this.lobby.deviceMode === 'online') {
+                    // Pada mode Multi-Perangkat, perangkat ini mengendalikan pemain lokal & memantau pemain lain secara live
+                    const nameEl = document.getElementById('playerName_0');
+                    const avatarEl = document.getElementById('playerAvatar_0');
+                    const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Peserta 1';
+                    const avatar = avatarEl ? avatarEl.value : AVATARS[0];
                     players.push({
-                        id: `P${i + 1}`,
+                        id: this.lobby.deviceUid,
+                        uid: this.lobby.deviceUid,
                         name,
                         avatar,
                         gamePoints: 0,
@@ -1792,23 +2001,69 @@ function jsonResponse(obj) {
                         scoreUraian: 0,
                         correctCount: 0,
                         wrongCount: 0,
-                        topicStats: {}
+                        topicStats: {},
+                        isRemote: false
                     });
+                    (this.lobby.onlinePlayers || []).forEach(rp => {
+                        if (rp.uid !== this.lobby.deviceUid) {
+                            players.push({
+                                id: rp.uid,
+                                uid: rp.uid,
+                                name: rp.name,
+                                avatar: rp.avatar,
+                                gamePoints: rp.gamePoints || 0,
+                                academicScore: rp.academicScore || 0,
+                                scorePG: 0,
+                                scoreIsian: 0,
+                                scoreUraian: 0,
+                                correctCount: rp.correctCount || 0,
+                                wrongCount: rp.wrongCount || 0,
+                                topicStats: {},
+                                isRemote: true
+                            });
+                        }
+                    });
+                } else {
+                    for (let i = 0; i < this.lobby.playerCount; i++) {
+                        const nameEl = document.getElementById(`playerName_${i}`);
+                        const avatarEl = document.getElementById(`playerAvatar_${i}`);
+                        const name = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : `Peserta ${i + 1}`;
+                        const avatar = avatarEl ? avatarEl.value : AVATARS[i];
+                        players.push({
+                            id: `P${i + 1}`,
+                            name,
+                            avatar,
+                            gamePoints: 0,
+                            scorePG: 0,
+                            scoreIsian: 0,
+                            scoreUraian: 0,
+                            correctCount: 0,
+                            wrongCount: 0,
+                            topicStats: {},
+                            isRemote: false
+                        });
+                    }
                 }
 
                 this.audio.init();
                 this.match = {
                     active: true,
-                    matchId: 'MATCH-' + Date.now().toString().slice(-6),
+                    matchId: (this.lobby.deviceMode === 'online' ? `${this.lobby.roomCode}-` : 'MATCH-') + Date.now().toString().slice(-6),
                     players,
                     currentQuestionIndex: 0,
                     currentPlayerTurn: 0,
                     timerInterval: null,
+                    livePollInterval: null,
                     timeLeft: 20,
                     maxTime: 20,
                     answeredCurrentTurn: false,
                     history: []
                 };
+
+                if (this.lobby.deviceMode === 'online') {
+                    this.pushLocalProgressToRoom('PLAYING');
+                    this.match.livePollInterval = setInterval(() => this.fetchRoomState(), 4000);
+                }
 
                 this.navigate('arena');
                 this.renderArenaTurn();
@@ -1943,16 +2198,16 @@ function jsonResponse(obj) {
                 const strip = document.getElementById('arenaScoreboardStrip');
                 strip.innerHTML = '';
                 // Urutkan salinan untuk menentukan peringkat sementara
-                const sorted = [...this.match.players].sort((a, b) => b.gamePoints - a.gamePoints || (b.scorePG + b.scoreIsian + b.scoreUraian) - (a.scorePG + a.scoreIsian + a.scoreUraian));
+                const sorted = [...this.match.players].sort((a, b) => b.gamePoints - a.gamePoints || ((b.academicScore ?? (b.scorePG + b.scoreIsian + b.scoreUraian) * 2)) - ((a.academicScore ?? (a.scorePG + a.scoreIsian + a.scoreUraian) * 2)));
 
                 this.match.players.forEach((p, idx) => {
-                    const isTurn = idx === this.match.currentPlayerTurn;
+                    const isTurn = this.lobby.deviceMode === 'online' ? !p.isRemote : idx === this.match.currentPlayerTurn;
                     const rank = sorted.findIndex(x => x.id === p.id) + 1;
-                    const academicVal = (p.scorePG + p.scoreIsian + p.scoreUraian) * 2;
+                    const academicVal = p.isRemote ? (p.academicScore || 0) : (p.scorePG + p.scoreIsian + p.scoreUraian) * 2;
                     const card = document.createElement('div');
                     card.className = isTurn
                         ? 'p-3 rounded-2xl bg-gradient-to-r from-cyan-950/90 to-purple-950/90 border-2 border-cyan-400 shadow-lg transition'
-                        : 'p-3 rounded-2xl bg-slate-900/70 border border-slate-800 opacity-80 transition';
+                        : 'p-3 rounded-2xl bg-slate-900/70 border border-slate-800 opacity-85 transition';
                     card.innerHTML = `
                         <div class="flex items-center justify-between">
                             <div class="flex items-center gap-2">
@@ -1962,7 +2217,10 @@ function jsonResponse(obj) {
                                         <span>${p.name}</span>
                                         <span class="px-1.5 py-0.2 rounded bg-amber-500/20 text-amber-300 text-[10px]">#${rank}</span>
                                     </div>
-                                    <div class="text-[10px] text-slate-400">Benar: <span class="text-emerald-400 font-bold">${p.correctCount}</span> • Salah: <span class="text-rose-400 font-bold">${p.wrongCount}</span></div>
+                                    <div class="text-[10px] text-slate-400">
+                                        Benar: <span class="text-emerald-400 font-bold">${p.correctCount}</span> • Salah: <span class="text-rose-400 font-bold">${p.wrongCount}</span>
+                                        ${p.isRemote && p.currentNo ? ` • <span class="text-purple-300">Soal #${p.currentNo}</span>` : ''}
+                                    </div>
                                 </div>
                             </div>
                             <div class="text-right">
@@ -2102,6 +2360,9 @@ function jsonResponse(obj) {
                 });
 
                 this.renderArenaScoreboard();
+                if (this.lobby.deviceMode === 'online') {
+                    this.pushLocalProgressToRoom('PLAYING');
+                }
 
                 // Tampilkan Feedback Panel
                 const fbPanel = document.getElementById('feedbackPanel');
@@ -2147,14 +2408,14 @@ function jsonResponse(obj) {
             },
 
             nextStep() {
-                // Jika masih ada pemain lain untuk nomor soal yang sama (Mode 2-4 pemain 1 perangkat)
-                if (this.match.currentPlayerTurn + 1 < this.match.players.length) {
+                // Pada mode 1 perangkat (lokal), bergiliran menjawab nomor soal yang sama
+                if (this.lobby.deviceMode !== 'online' && this.match.currentPlayerTurn + 1 < this.match.players.length) {
                     this.match.currentPlayerTurn++;
                     this.renderArenaTurn();
                     return;
                 }
 
-                // Semua pemain sudah menjawab nomor soal ini, lanjut ke nomor soal berikutnya
+                // Pada mode Multi-Perangkat atau semua giliran lokal selesai, lanjut ke nomor soal berikutnya
                 this.match.currentPlayerTurn = 0;
                 const prevBabak = this.questions[this.match.currentQuestionIndex].babak;
                 this.match.currentQuestionIndex++;
@@ -2205,19 +2466,27 @@ function jsonResponse(obj) {
             // ==================== HASIL AKHIR, PODIUM & SERTIFIKAT ====================
             finishMatch() {
                 clearInterval(this.match.timerInterval);
+                clearInterval(this.match.livePollInterval);
                 this.match.active = false;
                 this.audio.playFanfare();
 
                 // Hitung Nilai Akhir ASAS (skor perolehan x 2, maksimal 100)
                 this.match.players.forEach(p => {
-                    const rawScore = p.scorePG + p.scoreIsian + p.scoreUraian;
-                    p.academicScore = Math.min(100, rawScore * 2);
+                    if (!p.isRemote) {
+                        const rawScore = p.scorePG + p.scoreIsian + p.scoreUraian;
+                        p.academicScore = Math.min(100, rawScore * 2);
+                    }
                 });
+
+                if (this.lobby.deviceMode === 'online') {
+                    this.pushLocalProgressToRoom('FINISHED');
+                }
 
                 // Urutkan peringkat berdasarkan Poin Kompetisi, lalu Nilai ASAS
                 const rankedPlayers = [...this.match.players].sort((a, b) => b.gamePoints - a.gamePoints || b.academicScore - a.academicScore);
 
-                // Simpan ke riwayat sesi untuk Panel Guru & Leaderboard
+                // Simpan ke riwayat sesi untuk Panel Guru & Leaderboard (hanya simpan data pemain lokal agar tidak duplikat antar perangkat)
+                const localOnlyPlayers = rankedPlayers.filter(p => !p.isRemote);
                 const matchRecord = {
                     matchId: this.match.matchId,
                     date: new Date().toLocaleString('id-ID'),
@@ -2227,7 +2496,10 @@ function jsonResponse(obj) {
                 this.savedMatches.unshift(matchRecord);
 
                 // Sinkronkan otomatis ke Google Spreadsheet jika URL tersedia
-                this.autoSyncMatchToGas(matchRecord);
+                this.autoSyncMatchToGas({
+                    ...matchRecord,
+                    players: JSON.parse(JSON.stringify(localOnlyPlayers.length > 0 ? localOnlyPlayers : rankedPlayers))
+                });
 
                 this.navigate('results');
                 this.renderResultsView(matchRecord);
