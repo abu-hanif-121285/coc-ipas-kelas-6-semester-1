@@ -256,7 +256,10 @@
                             </div>
                             <div id="onlineRoomBox" class="hidden mt-2 p-3 rounded-xl bg-purple-950/60 border border-purple-500/40 space-y-2.5">
                                 <div class="flex gap-2">
-                                    <input type="text" id="roomCodeInput" value="IPAS6A" placeholder="Kode Room (Misal: IPAS6A)" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-purple-400/40 text-xs text-white uppercase font-mono">
+                                    <input type="text" id="roomCodeInput" value="" placeholder="Kode Room Baru (Contoh: IPAS-812)" class="w-full px-3 py-1.5 rounded-lg bg-slate-900 border border-purple-400/40 text-xs text-white uppercase font-mono">
+                                    <button type="button" onclick="app.generateNewRoomCode()" class="px-2.5 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-600 text-xs text-cyan-300" title="Buat Kode Room Acak Baru">
+                                        <i class="fa-solid fa-dice"></i>
+                                    </button>
                                     <button type="button" onclick="app.syncRoomOnline(false)" class="px-3 py-1.5 rounded-lg bg-purple-600 hover:bg-purple-500 text-xs font-bold text-white whitespace-nowrap flex items-center gap-1.5">
                                         <i class="fa-solid fa-right-to-bracket"></i> Gabung Room
                                     </button>
@@ -266,7 +269,7 @@
                                 </div>
                                 <div id="onlineRoleStatusBanner" class="px-2.5 py-1.5 rounded-lg bg-slate-900/90 border border-cyan-500/30 text-[11px] text-cyan-200 flex items-center justify-between">
                                     <span>Status Perangkat: <strong id="deviceRoleLabel" class="text-amber-300">Belum Bergabung</strong></span>
-                                    <span id="roomStateLabel" class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300">LOBBY</span>
+                                    <span id="roomStateLabel" class="px-2 py-0.5 rounded bg-slate-800 text-[10px] font-mono text-slate-300">MENUNGGU KODE</span>
                                 </div>
                                 <div id="onlineRoomRoster" class="p-2 rounded-lg bg-slate-950/80 border border-purple-500/30 text-[11px] space-y-1">
                                     <div class="flex items-center justify-between text-purple-300 font-bold">
@@ -274,10 +277,10 @@
                                         <span id="onlineRoomCountBadge" class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-200">0 Pemain</span>
                                     </div>
                                     <div id="onlineRoomPlayersList" class="text-slate-300 italic">
-                                        Isi identitas Anda di bawah lalu klik "Jadi Host" (untuk pembuat room) atau "Gabung Room" (untuk peserta).
+                                        Host: klik ikon dadu/Jadi Host untuk kode room baru. Peserta: masukkan kode room dari Host lalu klik "Gabung Room".
                                     </div>
                                 </div>
-                                <p class="text-[10px] text-purple-200/80"><strong>Aturan Quizizz Live:</strong> Hanya 1 orang (<strong>Host</strong>) yang dapat memulai & mengakhiri game untuk seluruh peserta di room.</p>
+                                <p class="text-[10px] text-purple-200/80"><strong>Aturan Quizizz Live:</strong> Setiap sesi menggunakan <strong>Kode Room baru</strong>. Room yang sudah diakhiri otomatis terkunci agar pemain baru tidak masuk ke sesi lama.</p>
                             </div>
                         </div>
 
@@ -1715,11 +1718,12 @@ function jsonResponse(obj) {
             lobby: {
                 playerCount: 1,
                 deviceMode: 'local', // 'local' | 'online'
-                roomCode: 'IPAS6A',
+                roomCode: '',
                 deviceUid: 'DEV-' + Math.random().toString(36).substring(2, 9).toUpperCase(),
                 isHost: false,
                 hostUid: '',
-                roomStatus: 'LOBBY',
+                roomStatus: 'NEW',
+                joinedRoomCode: '',
                 onlinePlayers: [],
                 roomPollInterval: null
             },
@@ -1903,11 +1907,41 @@ function jsonResponse(obj) {
                     if (this.lobby.playerCount > 1) {
                         this.setPlayerCount(1);
                     }
+                    // Reset status sesi lama jika kembali ke lobby setelah game selesai
+                    if (this.lobby.roomStatus === 'FINISHED' || !this.lobby.joinedRoomCode) {
+                        this.lobby.isHost = false;
+                        this.lobby.hostUid = '';
+                        this.lobby.roomStatus = 'NEW';
+                        this.lobby.joinedRoomCode = '';
+                        this.lobby.onlinePlayers = [];
+                        const inp = document.getElementById('roomCodeInput');
+                        if (inp && (!inp.value.trim() || inp.value.trim().toUpperCase() === 'IPAS6A')) {
+                            inp.value = '';
+                        }
+                    }
                     this.updateOnlineControlPermissions();
-                    this.fetchRoomState();
                     clearInterval(this.lobby.roomPollInterval);
-                    this.lobby.roomPollInterval = setInterval(() => this.fetchRoomState(), 2500);
+                    this.lobby.roomPollInterval = setInterval(() => {
+                        if (this.lobby.joinedRoomCode) this.fetchRoomState();
+                    }, 2500);
                 }
+            },
+
+            generateNewRoomCode() {
+                const randNum = Math.floor(100 + Math.random() * 900);
+                const newCode = `IPAS-${randNum}`;
+                const inp = document.getElementById('roomCodeInput');
+                if (inp) inp.value = newCode;
+                this.lobby.roomCode = newCode;
+                this.lobby.joinedRoomCode = '';
+                this.lobby.isHost = false;
+                this.lobby.hostUid = '';
+                this.lobby.roomStatus = 'NEW';
+                this.lobby.onlinePlayers = [];
+                const stateEl = document.getElementById('roomStateLabel');
+                if (stateEl) stateEl.textContent = 'SIAP DIBUAT';
+                this.updateOnlineControlPermissions();
+                this.showToast(`Kode room baru dibuat: ${newCode}. Klik "Jadi Host" untuk membuka room!`);
             },
 
             updateOnlineControlPermissions() {
@@ -1927,26 +1961,38 @@ function jsonResponse(obj) {
                     return;
                 }
 
-                if (this.lobby.isHost) {
-                    if (roleLabel) roleLabel.innerHTML = '<i class="fa-solid fa-crown text-amber-400 mr-1"></i> HOST (Pemimpin Room)';
+                if (this.lobby.isHost && this.lobby.joinedRoomCode) {
+                    if (roleLabel) roleLabel.innerHTML = `<i class="fa-solid fa-crown text-amber-400 mr-1"></i> HOST (${this.lobby.joinedRoomCode})`;
                     if (startBtn) startBtn.classList.remove('hidden');
                     if (startBtnText) startBtnText.textContent = 'MULAI UNTUK SEMUA PESERTA';
                     if (waitBanner) waitBanner.classList.add('hidden');
                     if (quitBtn) quitBtn.classList.remove('hidden');
                     if (quitLabel) quitLabel.textContent = 'Akhiri Semua';
-                } else {
-                    if (roleLabel) roleLabel.innerHTML = this.lobby.hostUid
-                        ? '<i class="fa-solid fa-user text-cyan-300 mr-1"></i> PESERTA (Dikendalikan Host)'
-                        : '<span class="text-slate-400">Belum Bergabung</span>';
+                } else if (this.lobby.joinedRoomCode && this.lobby.roomStatus !== 'FINISHED') {
+                    if (roleLabel) roleLabel.innerHTML = `<i class="fa-solid fa-user text-cyan-300 mr-1"></i> PESERTA (${this.lobby.joinedRoomCode})`;
                     if (startBtn) startBtn.classList.add('hidden');
                     if (waitBanner) waitBanner.classList.remove('hidden');
                     // Peserta biasa tidak dapat mengakhiri game untuk seluruh room
+                    if (quitBtn) quitBtn.classList.add('hidden');
+                } else {
+                    if (roleLabel) roleLabel.innerHTML = '<span class="text-slate-400">Belum Bergabung ke Room Aktif</span>';
+                    if (startBtn) startBtn.classList.add('hidden');
+                    if (waitBanner) waitBanner.classList.add('hidden');
                     if (quitBtn) quitBtn.classList.add('hidden');
                 }
             },
 
             async syncRoomOnline(claimHost = false) {
-                const code = document.getElementById('roomCodeInput').value.trim().toUpperCase() || 'IPAS6A';
+                let code = document.getElementById('roomCodeInput').value.trim().toUpperCase();
+                if (!code) {
+                    if (claimHost) {
+                        code = `IPAS-${Math.floor(100 + Math.random() * 900)}`;
+                        document.getElementById('roomCodeInput').value = code;
+                    } else {
+                        this.showToast('Masukkan Kode Room baru yang diberikan oleh Host!', 'warning');
+                        return;
+                    }
+                }
                 this.lobby.roomCode = code;
                 if (!this.settings.gasUrl) {
                     this.showToast('URL Google Apps Script belum diisi di Panel Guru.', 'warning');
@@ -1958,7 +2004,35 @@ function jsonResponse(obj) {
                 const localName = (nameEl && nameEl.value.trim()) ? nameEl.value.trim() : 'Peserta Online';
                 const localAvatar = avatarEl ? avatarEl.value : '🚀';
 
-                this.showToast(claimHost ? `Membuat Room ${code} sebagai Host...` : `Bergabung ke Room ${code}...`);
+                // Cek status room terlebih dahulu sebelum bergabung
+                try {
+                    const checkRes = await fetch(`${this.settings.gasUrl}?action=getRoomState&roomCode=${encodeURIComponent(code)}`);
+                    const checkData = await checkRes.json();
+                    if (!claimHost) {
+                        if (!checkData.hostUid || checkData.roomStatus === 'FINISHED') {
+                            this.lobby.joinedRoomCode = '';
+                            this.lobby.roomStatus = checkData.roomStatus || 'NOT_FOUND';
+                            this.updateOnlineControlPermissions();
+                            this.showToast(
+                                checkData.roomStatus === 'FINISHED'
+                                    ? `Room ${code} SUDAH BERAKHIR! Masukkan kode room baru dari Host.`
+                                    : `Room ${code} belum dibuka oleh Host! Pastikan kode room benar.`,
+                                'error'
+                            );
+                            return;
+                        }
+                    } else if (checkData.roomStatus === 'FINISHED') {
+                        // Jika Host mencoba memakai ulang kode room yang sudah FINISHED, buatkan kode baru otomatis
+                        code = `IPAS-${Math.floor(100 + Math.random() * 900)}`;
+                        document.getElementById('roomCodeInput').value = code;
+                        this.lobby.roomCode = code;
+                        this.showToast(`Room sebelumnya sudah berakhir. Otomatis membuat Room baru: ${code}`, 'warning');
+                    }
+                } catch (err) {
+                    console.warn('Pre-check room skipped:', err);
+                }
+
+                this.showToast(claimHost ? `Membuka Room Baru ${code} sebagai Host...` : `Bergabung ke Room ${code}...`);
                 try {
                     const res = await fetch(this.settings.gasUrl, {
                         method: 'POST',
@@ -1978,6 +2052,7 @@ function jsonResponse(obj) {
                         })
                     });
                     const resData = await res.json();
+                    this.lobby.joinedRoomCode = code;
                     if (resData.hostUid) {
                         this.lobby.hostUid = resData.hostUid;
                         this.lobby.isHost = (resData.hostUid === this.lobby.deviceUid);
@@ -1985,22 +2060,26 @@ function jsonResponse(obj) {
                     this.updateOnlineControlPermissions();
                     await this.fetchRoomState();
                     this.showToast(this.lobby.isHost
-                        ? `Anda adalah HOST Room ${code}! Klik Mulai jika semua peserta sudah masuk.`
-                        : `${localName} bergabung sebagai PESERTA di Room ${code}. Menunggu Host!`);
+                        ? `Room ${code} siap! Bagikan kode ${code} ke peserta lalu klik Mulai.`
+                        : `${localName} berhasil masuk ke Room ${code}. Menunggu Host memulai!`);
                 } catch (e) {
-                    this.showToast('Gagal sinkron ke Room. Pastikan script GAS terbaru sudah di-Deploy!', 'error');
+                    this.showToast('Gagal sinkron ke Room. Periksa koneksi internet Anda!', 'error');
                 }
             },
 
             async fetchRoomState() {
-                if (!this.settings.gasUrl || this.lobby.deviceMode !== 'online') return;
-                const code = (document.getElementById('roomCodeInput')?.value || this.lobby.roomCode || 'IPAS6A').trim().toUpperCase();
-                this.lobby.roomCode = code;
+                if (!this.settings.gasUrl || this.lobby.deviceMode !== 'online' || !this.lobby.joinedRoomCode) return;
+                const code = this.lobby.joinedRoomCode;
                 try {
                     const res = await fetch(`${this.settings.gasUrl}?action=getRoomState&roomCode=${encodeURIComponent(code)}`);
                     const data = await res.json();
                     if (data.status === 'ok' && Array.isArray(data.players)) {
-                        this.lobby.onlinePlayers = data.players;
+                        // Filter hanya peserta yang belum berstatus FINISHED jika room masih aktif di LOBBY/PLAYING
+                        const activeRoomPlayers = data.roomStatus === 'FINISHED'
+                            ? data.players
+                            : data.players.filter(p => p.status !== 'FINISHED');
+
+                        this.lobby.onlinePlayers = activeRoomPlayers;
                         if (data.hostUid) {
                             this.lobby.hostUid = data.hostUid;
                             this.lobby.isHost = (data.hostUid === this.lobby.deviceUid);
@@ -2014,12 +2093,14 @@ function jsonResponse(obj) {
 
                         const badge = document.getElementById('onlineRoomCountBadge');
                         const listEl = document.getElementById('onlineRoomPlayersList');
-                        if (badge) badge.textContent = `${data.players.length} Pemain`;
+                        if (badge) badge.textContent = `${activeRoomPlayers.length} Pemain`;
                         if (listEl) {
-                            if (data.players.length === 0) {
-                                listEl.innerHTML = `<span class="italic text-slate-400">Belum ada pemain di room ${code}. Klik "Jadi Host" atau "Gabung Room".</span>`;
+                            if (data.roomStatus === 'FINISHED') {
+                                listEl.innerHTML = `<span class="text-rose-300 font-semibold">Room ${code} telah berakhir. Masukkan kode room baru untuk bermain lagi.</span>`;
+                            } else if (activeRoomPlayers.length === 0) {
+                                listEl.innerHTML = `<span class="italic text-slate-400">Menunggu peserta masuk ke room ${code}...</span>`;
                             } else {
-                                listEl.innerHTML = data.players.map(p => `
+                                listEl.innerHTML = activeRoomPlayers.map(p => `
                                     <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md ${p.uid === data.hostUid ? 'bg-amber-500/20 border-amber-400/60' : 'bg-purple-900/70 border-purple-500/40'} border text-white mr-1.5 mb-1">
                                         <span>${p.avatar}</span>
                                         <span class="font-semibold">${p.name}</span>
@@ -2032,7 +2113,7 @@ function jsonResponse(obj) {
 
                         // Auto-start untuk peserta saat Host memulai pertandingan
                         if (!this.match.active && !this.lobby.isHost && data.roomStatus === 'PLAYING') {
-                            const amIJoined = data.players.some(p => p.uid === this.lobby.deviceUid);
+                            const amIJoined = activeRoomPlayers.some(p => p.uid === this.lobby.deviceUid);
                             if (amIJoined) {
                                 this.showToast('Host telah memulai pertandingan! Memasuki arena...');
                                 this.startMatch(true);
@@ -2048,7 +2129,7 @@ function jsonResponse(obj) {
                                 this.finishMatch(true);
                                 return;
                             }
-                            this.mergeOnlinePlayersToMatch(data.players);
+                            this.mergeOnlinePlayersToMatch(activeRoomPlayers);
                             this.renderArenaScoreboard();
                         }
                     }
@@ -2639,6 +2720,14 @@ function jsonResponse(obj) {
 
                 if (this.lobby.deviceMode === 'online') {
                     this.pushLocalProgressToRoom('FINISHED', (this.lobby.isHost && !triggeredByHostSync) ? 'FINISHED' : '');
+                    // Kosongkan sesi room aktif agar saat klik Main Lagi wajib menggunakan room baru
+                    this.lobby.roomStatus = 'FINISHED';
+                    this.lobby.joinedRoomCode = '';
+                    this.lobby.isHost = false;
+                    this.lobby.hostUid = '';
+                    this.lobby.onlinePlayers = [];
+                    const roomInp = document.getElementById('roomCodeInput');
+                    if (roomInp) roomInp.value = '';
                 }
 
                 // Urutkan peringkat berdasarkan Poin Kompetisi, lalu Nilai ASAS
